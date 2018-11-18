@@ -1,5 +1,4 @@
 # IAML_2018
-Project repository for the course 
 *Industrial Applications of Machine Learning* (2018 Fall), Seoul National University.
 
 ## Project 1
