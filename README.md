@@ -1,5 +1,5 @@
 # IAML_2018
-*Industrial Applications of Machine Learning* , Fall 2018, Seoul National University.
+*Industrial Application of Machine Learning* , Fall 2018, Seoul National University.
 
 ## Project 1
 ### Genre classification
