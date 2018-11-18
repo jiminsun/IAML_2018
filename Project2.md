@@ -1,5 +1,5 @@
-README.md <br>
-updated : 2018-11-01-16:22 - 처음작성 
+Project2.md <br>
+updated : 2018-11-18-12:39 - 파일 이름 변경
 <!-- 수정시 아래 이어서 updated 날짜 시간 & 수정사항 추가 -->
 
 # IAML Project 2
