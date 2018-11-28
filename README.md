@@ -18,8 +18,11 @@
 ### Chord prediction
 
 * 12초 길이의 wav 파일의 chord 맞추기
+* Implemented the CRNN structure suggested in [Choi. et al](https://ieeexplore.ieee.org/abstract/document/7952585) with some modifications to address to this specific task.
+* The model showed 99% accuracy on the training set and 93% accuracy on the validation set.
+* The performance could be improved via other models such as the [Transformer](http://papers.nips.cc/paper/7181-attention-is-all-you-need), but haven't been tried yet.
 
 ## Project 4
-
+### Music Generation
 TBA
 
