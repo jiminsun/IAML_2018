@@ -1,15 +1,37 @@
 import tensorflow as tf
-import numpy as np
 from dataloader import *
 from tensorflow.python.platform import gfile
 from time import strftime, localtime, time
+from model import *
+from utils import *
+import argparse
 
 # hyperparameters
-# TODO : declare additional hyperparameters
-# not fixed (change or add hyperparameter as you like)
-batch_size = 32
-epoch_num = 5
-learning_rate = 0.001
+# TODO : declare additional Hyperparameters.
+parser = argparse.ArgumentParser()
+parser.add_argument('-batch_size', type=int, default=32)
+parser.add_argument('-learning_rate', type=float, default=0.001)
+parser.add_argument('-lr_decay', action='store_true', default=True)
+parser.add_argument('-optimizer', type=str, default='adam')
+parser.add_argument('-epoch_num', type=int, default=100)
+parser.add_argument('-train_test_split_ratio', type=float, default=0.8)
+parser.add_argument('-model', type=str, default='crnn')
+parser.add_argument('-rnn_hidden_dim', type=int, default=64)
+parser.add_argument('-input_dim', type=int, default=64)
+parser.add_argument('-multi_rnn', action='store_true', default=False)
+parser.add_argument('-restore', action='store_true', default=False)
+parser.add_argument('-n_epoch_no_imprv', type=int, default=10)
+
+args = parser.parse_args()
+
+global_step = tf.Variable(0, trainable=False, name='global_step')
+if args.lr_decay:
+    #print("Learning rate decay applied")
+    starter_learning_rate = args.learning_rate
+    learning_rate = tf.train.exponential_decay(starter_learning_rate,
+                                               global_step, 500, 0.97, staircase=True)
+else:
+    learning_rate = args.learning_rate
 
 
 # fixed
@@ -18,14 +40,14 @@ feature_path = data_path + '/features.pkl'
 chord_path = data_path + '/chords.pkl'
 # True if you want to train, False if you already trained your model
 ### TODO : IMPORTANT !!! Please change it to False when you submit your code
-is_train_mode = True
+is_train_mode = False
 ### TODO : IMPORTANT !!! Please specify the path where your best model is saved
 ### example : checkpoint/run-0925-0348
-checkpoint_path = 'checkpoint'
-
+checkpoint_path = 'checkpoint/crnn_64_run-1126-2009'
+if is_train_mode:
+    checkpoint_path = 'checkpoint'
 
 # make xs and ys
-wav_list = get_wav_list(data_path, chord_path)
 
 # if there is no feature file, make it
 if gfile.Exists(feature_path):
@@ -34,53 +56,60 @@ if gfile.Exists(feature_path):
         valid_wav_list, features_list = pickle.load(f)
 else:
     print('Make feature file')
+    wav_list = get_wav_list(data_path, chord_path)
     valid_wav_list, features_list = wav_list_to_feature_list(wav_list)
     with open(feature_path, 'wb') as f:
         pickle.dump((valid_wav_list, features_list), f)
 
+wav_list = valid_wav_list
 # onehot encoding (total 25 chords)
 label_list = get_label_list(chord_path, valid_wav_list)
 encoded_label_list = [encode_label(labels) for labels in label_list]
 encoded_label_list = np.array(encoded_label_list)
 
 # split train and test
-split = int(len(wav_list)*0.8)
+split = int(len(wav_list)*args.train_test_split_ratio)
 
+# TODO : Build model
 # build dataset
 dataset = tf.data.Dataset.from_tensor_slices((features_list, encoded_label_list))
-dataset = dataset.repeat()
-dataset = dataset.shuffle(buffer_size=len(wav_list))
-dataset = dataset.batch(batch_size)
-dataset = dataset.prefetch(batch_size)
+train_dataset = dataset.take(split)
+test_dataset = dataset.skip(split)
 
-# train/test data is different each time you run main.py
-test_dataset = dataset.take(split)
-train_dataset = dataset.skip(split)
+train_dataset = train_dataset.shuffle(buffer_size=len(wav_list) - split)
+train_dataset = train_dataset.batch(args.batch_size)
+train_dataset = train_dataset.prefetch(args.batch_size)
+train_dataset = train_dataset.repeat(args.epoch_num)
 
-iter = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
+test_dataset = test_dataset.shuffle(buffer_size=split)
+test_dataset = test_dataset.batch(args.batch_size)
+test_dataset = test_dataset.prefetch(args.batch_size)
+test_dataset = test_dataset.repeat(1)
+
+iter = tf.data.Iterator.from_structure(train_dataset.output_types, train_dataset.output_shapes)
 train_init = iter.make_initializer(train_dataset)
 test_init = iter.make_initializer(test_dataset)
 
 # batch of features, batch of labels
 X, Y = iter.get_next()
+# print(X.shape, Y.shape)
 
+#model = CNN_Model(batch_size=args.batch_size)
+#model_name = args.model
 
-# TODO : build your model here
-global_step = tf.Variable(0, trainable=False, name='global_step')
-X = tf.reshape(X, [-1, 1034, 20, 1])
+model = CRNN_Model(hidden_dim=args.rnn_hidden_dim, input_len=args.input_dim,
+                   batch_size=args.batch_size)
+model_name = args.model + '_' + str(args.rnn_hidden_dim) + '_'
 
-conv = tf.layers.conv2d(X, filters=5, kernel_size=[84, 1], strides=10,
-                       padding='VALID', activation=tf.nn.relu)
-conv = tf.reshape(conv, [-1, 96*2*5])
-dense = tf.layers.dense(conv, units=96*25, activation=tf.nn.relu)
-dropout = tf.layers.dropout(dense, rate=0.5, training=is_train_mode)
-logits = tf.reshape(dropout, [-1, 96, 25])
+logits, cost = model.build_graph(X, Y, is_train_mode)
 
-cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=Y, dim=2))
-optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost, global_step=global_step)
+optimizer = get_optim(args.optimizer)(learning_rate=learning_rate)
 
-infer = tf.argmax(logits, axis=2)
-answer = tf.argmax(Y, axis=2)
+extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+with tf.control_dependencies(extra_update_ops):
+    train_step = optimizer.minimize(cost, global_step=global_step)
+infer = tf.argmax(logits, axis=-1)
+answer = tf.argmax(Y, axis=-1)
 
 # calculate accuracy
 correct_prediction = tf.equal(infer, answer)
@@ -89,45 +118,66 @@ accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
 # train and evaluate
 with tf.Session() as sess:
-    saver = tf.train.Saver()
-    ckpt = tf.train.get_checkpoint_state(checkpoint_path)
-    if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
-        print('Load model from : %s' % checkpoint_path)
-        saver.restore(sess, ckpt.model_checkpoint_path)
-    else:
-        sess.run(tf.global_variables_initializer())
-
     if is_train_mode:
+        saver = tf.train.Saver()
+        ckpt = tf.train.get_checkpoint_state(checkpoint_path)
+        if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
+            print('Load model from : %s' % checkpoint_path)
+            saver.restore(sess, ckpt.model_checkpoint_path)
+        else:
+            sess.run(tf.global_variables_initializer())
+
         print('Start training')
-        train_total_batch = int(split / batch_size)
-        total_epoch = 0
-        sess.run(train_init)
-        for epoch in range(epoch_num):
+        train_total_batch = int(split / args.batch_size)
+        #sess.run(train_init)
+        best_score = 0.0
+        n_epoch_no_imprv = 0 # for early stopping
+
+        for epoch in range(args.epoch_num):
             # TODO: do some train step code here
             print('------------------- epoch:', epoch, ' -------------------')
+            sess.run(train_init)
+            is_train_mode = True
             for _ in range(train_total_batch):
-                c, _, acc = sess.run([cost, optimizer, accuracy])
+                c, _, acc = sess.run([cost, train_step, accuracy])
                 print('Step: %5d, ' % sess.run(global_step), ' Cost: %.4f ' % c,
                       ' Accuracy: %.4f ' % acc)
 
+             # TODO : do accuracy test
+             # TODO : implement early-stopping
+
+            test_total_batch = int((len(wav_list) - split) / args.batch_size)
+            sess.run(test_init)
+            val_acc = 0.0
+            is_train_mode = False
+            for _ in range(test_total_batch):
+                val_acc += sess.run(accuracy)
+            print('Test accuracy: %.4f' % (val_acc / test_total_batch))
+
+            if val_acc >= best_score:
+                n_epoch_no_imprv = 0
+                if val_acc / test_total_batch > 0.85:
+                    final_path = checkpoint_path + '/' + model_name + 'run-%02d%02d-%02d%02d/' % tuple(localtime(time()))[1:5]
+                    if not gfile.Exists(final_path):
+                        gfile.MakeDirs(final_path)
+                    saver.save(sess, final_path, global_step=global_step)
+                    print('Model saved in file : %s' % final_path)
+                best_score = val_acc
+            else:
+                n_epoch_no_imprv += 1
+                if n_epoch_no_imprv == args.n_epoch_no_imprv:
+                    print("- early stopping {} epochs without improvement".format(n_epoch_no_imprv))
+                    break
         print('Training finished!')
 
-        # TODO : do accuracy test
-        test_total_batch = int((len(wav_list) - split) / batch_size)
+    else:
+        print("Start evaluating..")
+        saver = tf.train.Saver()
+        ckpt = tf.train.get_checkpoint_state(checkpoint_path)
+        saver.restore(sess, ckpt.model_checkpoint_path)
+        test_total_batch = int((len(wav_list) - split) / args.batch_size)
         sess.run(test_init)
         acc = 0.0
         for _ in range(test_total_batch):
-            acc += accuracy.eval()
-
-        print('Test accuracy: %.4f' % (acc/test_total_batch))
-
-        # save checkpoint
-        final_path = checkpoint_path + '/run-%02d%02d-%02d%02d/' % tuple(localtime(time()))[1:5]
-        if not gfile.Exists(final_path):
-            gfile.MakeDirs(final_path)
-        saver.save(sess, final_path, global_step=global_step)
-        print('Model saved in file : %s' % final_path)
-
-    else:
-        saver.restore(sess, ckpt.model_checkpoint_path)
-        # ...
+            acc += sess.run(accuracy)
+        print('Test accuracy: %.4f' % (acc / test_total_batch))

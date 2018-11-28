@@ -3,6 +3,53 @@ import numpy as np
 import pandas as pd
 import librosa
 
+def compute_chroma_stft(path):
+    threshold = 630000
+    features = []
+    try:
+        x, sr = librosa.load(path, sr=44100, mono=True)
+        x = x.tolist()
+
+        #if len(x) < threshold:
+        #    raise ValueError('song length is shorter than threshold')
+        #else:
+        #    x = x[:threshold]
+        x = np.array(x)
+
+        stft = np.abs(librosa.stft(x, n_fft=2048, hop_length=512))
+        assert stft.shape[0] == 1 + 2048 // 2
+        assert np.ceil(len(x) / 512) <= stft.shape[1] <= np.ceil(len(x) / 512) + 1
+        del x
+
+            # chroma_stft
+            # returns (n_chroma, t)
+        f = librosa.feature.chroma_stft(S=stft ** 2, n_chroma=12)
+        features.append(np.transpose(f).tolist())
+
+    except Exception as e:
+        print('{}: {}'.format(path, repr(e)))
+        return None
+
+    return features
+
+
+def compute_melspec(path):
+    features = []
+    try:
+        x, sr = librosa.load(path, sr=44100, mono=True)
+        x = x.tolist()
+        x = np.array(x)
+        stft = np.abs(librosa.stft(x, n_fft=2048, hop_length=512))
+        del x
+        mel = librosa.feature.melspectrogram(sr=sr, S=stft ** 2)
+        features.append(np.transpose(mel).tolist())
+
+    except Exception as e:
+        print('{}: {}'.format(path, repr(e)))
+        return None
+
+    return features
+
 
 def compute_mfcc_example(path):
     features = []
