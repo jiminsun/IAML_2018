@@ -4,7 +4,7 @@
 ## Project 1
 ### Genre classification   
 * Requirements
-    * 30초 길이의 노래가 주어졌을 때 해당 곡의 장르를 맞추기
+    * 30초 길이의 노래가 주어졌을 때 해당 곡의 장르 맞추기
     * CNN 계열의 모델 사용
 
 ## Project 2
